@@ -8,7 +8,7 @@ This is a lucky draw by dropping marbles.
 
 - Typescript
 - Parcel
-- Planck.js
+- box2d-wasm
 
 # Development
 
