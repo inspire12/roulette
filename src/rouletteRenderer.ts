@@ -1,220 +1,208 @@
-import {canvasHeight, canvasWidth, initialZoom} from './constants';
-import {Camera} from './camera';
-import {StageDef} from './maps';
-import { Body } from 'planck';
-import {Marble} from './marble';
-import {ParticleManager} from './particleManager';
-import {GameObject} from './gameObject';
+import {canvasHeight, canvasWidth, DefaultBloomColor, DefaultEntityColor, initialZoom} from './data/constants';
+import { Camera } from './camera';
+import { StageDef } from './data/maps';
+import { Marble } from './marble';
+import { ParticleManager } from './particleManager';
+import { GameObject } from './gameObject';
+import { UIObject } from './UIObject';
+import { VectorLike } from './types/VectorLike';
+import { MapEntityState } from './types/MapEntity.type';
 
 export type RenderParameters = {
-    camera: Camera,
-    stage: StageDef,
-    objects: Body[],
-    marbles: Marble[],
-    winners: Marble[],
-    particleManager: ParticleManager,
-    effects: GameObject[],
+  camera: Camera;
+  stage: StageDef;
+  entities: MapEntityState[];
+  marbles: Marble[];
+  winners: Marble[];
+  particleManager: ParticleManager;
+  effects: GameObject[];
+  winnerRank: number;
+  winner: Marble | null;
+  size: VectorLike;
 };
 
 export class RouletteRenderer {
-    private _canvas!: HTMLCanvasElement;
-    private _ctx!: CanvasRenderingContext2D;
+  private _canvas!: HTMLCanvasElement;
+  private ctx!: CanvasRenderingContext2D;
+  public sizeFactor = 1;
 
-    constructor() {
-    }
+  private _images: { [key: string]: HTMLImageElement } = {};
 
-    get width() {
-        return this._canvas.width;
-    }
+  constructor() {
+  }
 
-    get height() {
-        return this._canvas.height;
-    }
+  get width() {
+    return this._canvas.width;
+  }
 
-    init() {
-        this._canvas = document.createElement('canvas');
-        this._canvas.width = canvasWidth;
-        this._canvas.height = canvasHeight;
-        this._ctx = this._canvas.getContext('2d', {alpha: false}) as CanvasRenderingContext2D;
+  get height() {
+    return this._canvas.height;
+  }
 
-        document.body.appendChild(this._canvas);
+  get canvas() {
+    return this._canvas;
+  }
 
-        const resizing = (entries?: ResizeObserverEntry[]) => {
-            const realSize = entries ? entries[0].contentRect : this._canvas.getBoundingClientRect();
-            const width = Math.max(realSize.width / 2, 640);
-            const height = (width / realSize.width) * realSize.height;
-            this._canvas.width = width;
-            this._canvas.height = height;
-        }
+  async init() {
+    await this._load();
 
-        const resizeObserver = new ResizeObserver(resizing);
+    this._canvas = document.createElement('canvas');
+    this._canvas.width = canvasWidth;
+    this._canvas.height = canvasHeight;
+    this.ctx = this._canvas.getContext('2d', {
+      alpha: false,
+    }) as CanvasRenderingContext2D;
 
-        resizeObserver.observe(this._canvas);
-        resizing();
-    }
+    document.body.appendChild(this._canvas);
 
-    render(renderParameters: RenderParameters) {
-        this._ctx.fillStyle = 'black';
-        this._ctx.fillRect(0, 0, this._canvas.width, this._canvas.height);
+    const resizing = (entries?: ResizeObserverEntry[]) => {
+      const realSize = entries
+        ? entries[0].contentRect
+        : this._canvas.getBoundingClientRect();
+      const width = Math.max(realSize.width / 2, 640);
+      const height = (width / realSize.width) * realSize.height;
+      this._canvas.width = width;
+      this._canvas.height = height;
+      this.sizeFactor = width / realSize.width;
+    };
 
-        this._ctx.save();
-        this._ctx.scale(initialZoom, initialZoom);
-        this._ctx.textAlign = 'left';
-        this._ctx.textBaseline = 'top';
-        this._ctx.font = '0.4pt sans-serif';
-        renderParameters.camera.renderScene(this._ctx, () => {
-            this._renderWalls({...renderParameters, isMinimap: false});
-            this._renderObjects({
-                ...renderParameters,
-                isMinimap: false,
-            });
-            this._renderEffects(renderParameters);
-            this._renderMarbles(renderParameters);
-        });
-        this._ctx.restore();
+    const resizeObserver = new ResizeObserver(resizing);
 
-        this._renderMinimap(renderParameters);
-        renderParameters.particleManager.render(this._ctx);
-        this._renderRanking(renderParameters);
-        this._renderWinner(renderParameters);
-    }
+    resizeObserver.observe(this._canvas);
+    resizing();
+  }
 
-    private _renderWalls({stage, camera, isMinimap = false}: { stage: StageDef, camera: Camera, isMinimap?: boolean }) {
-        if (!stage) return;
-        this._ctx.save();
-        this._ctx.strokeStyle = isMinimap ? 'black' : 'white';
-        this._ctx.lineWidth = isMinimap ? 0.5 : 5 / (camera.zoom + initialZoom);
-        this._ctx.beginPath();
-        stage.walls.forEach((wallDef) => {
-            this._ctx.moveTo(wallDef[0][0], wallDef[0][1]);
-            for (let i = 1; i < wallDef.length; i++) {
-                this._ctx.lineTo(wallDef[i][0], wallDef[i][1]);
+  private async _load(): Promise<void> {
+    return new Promise((rs) => {
+      const imageUrl = new URL('/assets/images/chamru.png', import.meta.url);
+      this._images['챔루'] = new Image();
+      this._images['챔루'].src = imageUrl.toString();
+      this._images['챔루'].addEventListener('load', () => {
+        rs();
+      });
+    });
+  }
+
+  render(renderParameters: RenderParameters, uiObjects: UIObject[]) {
+    this.ctx.fillStyle = 'black';
+    this.ctx.fillRect(0, 0, this._canvas.width, this._canvas.height);
+
+    this.ctx.save();
+    this.ctx.scale(initialZoom, initialZoom);
+    this.ctx.textAlign = 'left';
+    this.ctx.textBaseline = 'top';
+    this.ctx.font = '0.4pt sans-serif';
+    this.ctx.lineWidth = 3 / (renderParameters.camera.zoom + initialZoom);
+    renderParameters.camera.renderScene(this.ctx, () => {
+      this.renderEntities(renderParameters.entities);
+      this.renderEffects(renderParameters);
+      this.renderMarbles(renderParameters);
+    });
+    this.ctx.restore();
+
+    uiObjects.forEach((obj) =>
+      obj.render(
+        this.ctx,
+        renderParameters,
+        this._canvas.width,
+        this._canvas.height,
+      ),
+    );
+    renderParameters.particleManager.render(this.ctx);
+    this.renderWinner(renderParameters);
+  }
+
+  private renderEntities(entities: MapEntityState[]) {
+    this.ctx.save();
+    entities.forEach((entity) => {
+      this.ctx.save();
+      this.ctx.translate(entity.x, entity.y);
+      this.ctx.rotate(entity.angle);
+      this.ctx.fillStyle = DefaultEntityColor[entity.shape.type];
+      this.ctx.strokeStyle = DefaultEntityColor[entity.shape.type];
+      this.ctx.shadowBlur = 15;
+      this.ctx.shadowColor = DefaultBloomColor[entity.shape.type];
+      const shape = entity.shape;
+      switch (shape.type) {
+        case 'polyline':
+          if (shape.points.length > 0) {
+            this.ctx.beginPath();
+            this.ctx.moveTo(shape.points[0][0], shape.points[0][1]);
+            for(let i = 1; i < shape.points.length; i++) {
+              this.ctx.lineTo(shape.points[i][0], shape.points[i][1]);
             }
-        });
-        if (!isMinimap) {
-            this._ctx.shadowColor = 'cyan';
-            this._ctx.shadowBlur = 15;
-        }
-        this._ctx.stroke();
-        this._ctx.closePath();
-        this._ctx.restore();
-    }
+            this.ctx.stroke();
+          }
+          break;
+        case 'box':
+          const w = shape.width * 2;
+          const h = shape.height * 2;
+          this.ctx.rotate(shape.rotation);
+          this.ctx.fillRect(-w / 2, -h / 2, w, h);
+          this.ctx.strokeRect(-w / 2, -h / 2, w, h);
+          break;
+        case 'circle':
+          this.ctx.beginPath();
+          this.ctx.arc(0, 0, shape.radius, 0, Math.PI * 2, false);
+          this.ctx.stroke();
+          break;
+      }
 
-    private _renderObjects({
-                               objects,
-                               camera,
-                               isMinimap = false
-                           }: { objects: Body[], camera: Camera, isMinimap?: boolean }) {
-        this._ctx.save();
-        this._ctx.fillStyle = 'black';
-        this._ctx.lineWidth = 3 / (camera.zoom + initialZoom);
-        objects.forEach(obj => {
-            this._ctx.save();
-            const pos = obj.getPosition();
-            const ang = obj.getAngle();
-            this._ctx.translate(pos.x, pos.y);
-            this._ctx.rotate(ang);
-            for (let fixture = obj.getFixtureList(); fixture; fixture = fixture.getNext()) {
-                const shape = fixture.getShape() as planck.Polygon;
-                this._ctx.beginPath();
-                switch(shape.getType()) {
-                    case 'circle':
-                        this._ctx.strokeStyle = 'yellow';
-                        this._ctx.arc(0, 0, shape.m_radius, 0, Math.PI * 2);
-                        break;
-                    default:
-                        this._ctx.strokeStyle = '#94d5ed';
-                        const vertices = shape.m_vertices;
-                        this._ctx.moveTo(vertices[0].x, vertices[0].y);
-                        for (let i = 1; i < vertices.length; i++) {
-                            const vert = vertices[i];
-                            this._ctx.lineTo(vert.x, vert.y);
-                        }
-                        this._ctx.closePath();
-                        break;
-                }
-                this._ctx.fill();
+      this.ctx.restore();
+    });
+    this.ctx.restore();
+  }
 
-                if (!isMinimap) {
-                    this._ctx.save();
-                    this._ctx.shadowBlur = 15;
-                    this._ctx.shadowColor = 'cyan';
-                    this._ctx.stroke();
-                    this._ctx.restore();
-                }
+  private renderEffects({ effects, camera }: RenderParameters) {
+    effects.forEach((effect) =>
+      effect.render(this.ctx, camera.zoom * initialZoom),
+    );
+  }
 
-                this._ctx.closePath();
-            }
-            this._ctx.restore();
-        });
-        this._ctx.restore();
-    }
+  private renderMarbles({
+                          marbles,
+                          camera,
+                          winnerRank,
+                          winners,
+                        }: RenderParameters) {
+    const winnerIndex = winnerRank - winners.length;
 
-    private _renderEffects({effects, camera}: RenderParameters) {
-        effects.forEach(effect => effect.render(this._ctx, camera.zoom * initialZoom));
-    }
+    marbles.forEach((marble, i) => {
+      marble.render(
+        this.ctx,
+        camera.zoom * initialZoom,
+        i === winnerIndex,
+        false,
+        this._images[marble.name] || undefined,
+      );
+    });
+  }
 
-    private _renderMarbles({isMinimap = false, marbles, camera}: RenderParameters & { isMinimap?: boolean }) {
-        marbles.forEach(marble => {
-            marble.render(this._ctx, camera.zoom * initialZoom, isMinimap);
-        });
-    }
-
-    private _renderMinimap(params: RenderParameters) {
-        const {stage} = params;
-        if (!stage) return;
-        if (this._canvas.width < this._canvas.height) return;
-        this._ctx.save();
-        this._ctx.fillStyle = `#333`;
-        this._ctx.translate(10, 10);
-        this._ctx.scale(4, 4);
-        this._ctx.fillRect(0, 0, 26, stage.goalY);
-        this._renderWalls({...params, isMinimap: true});
-        this._renderObjects({...params, isMinimap: true});
-        this._renderMarbles({...params, isMinimap: true});
-        this._ctx.restore();
-    }
-
-    private _renderRanking({winners, marbles}: RenderParameters) {
-        const lineWidth = 100;
-        const totalCount = winners.length + marbles.length;
-        const fontHeight = 16;
-        const lineHeight = (this._canvas.height - 20);
-
-        const lines = Math.ceil((totalCount * fontHeight) / lineHeight);
-        const perLine = Math.ceil((winners.length + marbles.length) / lines);
-        const startX = this._canvas.width - 5 - ((lines - 1) * lineWidth);
-
-        this._ctx.save();
-        this._ctx.font = 'bold 11pt sans-serif';
-        this._ctx.textAlign = 'right';
-        winners.forEach((marble, rank) => {
-            this._ctx.fillStyle = marble.color;
-            const line = Math.floor(rank / perLine);
-            const y = (rank % perLine) * fontHeight;
-            this._ctx.fillText(`\u2714 ${marble.name} #${rank + 1}`, startX + line * lineWidth, 20 + y);
-        });
-        this._ctx.font = '10pt sans-serif';
-        marbles.forEach((marble, rank) => {
-            this._ctx.fillStyle = marble.color;
-            const y = ((rank + winners.length) % perLine) * fontHeight;
-            this._ctx.fillText(`${marble.name} #${rank + 1 + winners.length}`, startX + Math.floor((rank + winners.length) / perLine) * lineWidth, 20 + y);
-        });
-        this._ctx.restore();
-    }
-
-    private _renderWinner({winners}: RenderParameters) {
-        if (winners.length === 0) return;
-        this._ctx.save();
-        this._ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
-        this._ctx.fillRect(this._canvas.width / 2, this._canvas.height - 168, this._canvas.width / 2, 168);
-        this._ctx.fillStyle = 'white';
-        this._ctx.font = 'bold 48px sans-serif';
-        this._ctx.textAlign = 'right';
-        this._ctx.fillText('Winner', this._canvas.width - 10, this._canvas.height - 120);
-        this._ctx.font = 'bold 72px sans-serif';
-        this._ctx.fillStyle = winners[0].color;
-        this._ctx.fillText(winners[0].name, this._canvas.width - 10, this._canvas.height - 55);
-        this._ctx.restore();
-    }
+  private renderWinner({ winner }: RenderParameters) {
+    if (!winner) return;
+    this.ctx.save();
+    this.ctx.fillStyle = 'rgba(0, 0, 0, 0.5)';
+    this.ctx.fillRect(
+      this._canvas.width / 2,
+      this._canvas.height - 168,
+      this._canvas.width / 2,
+      168,
+    );
+    this.ctx.fillStyle = 'white';
+    this.ctx.font = 'bold 48px sans-serif';
+    this.ctx.textAlign = 'right';
+    this.ctx.fillText(
+      'Winner',
+      this._canvas.width - 10,
+      this._canvas.height - 120,
+    );
+    this.ctx.font = 'bold 72px sans-serif';
+    this.ctx.fillStyle = winner.color;
+    this.ctx.fillText(
+      winner.name,
+      this._canvas.width - 10,
+      this._canvas.height - 55,
+    );
+    this.ctx.restore();
+  }
 }
